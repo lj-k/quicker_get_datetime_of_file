@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 编译并运行回归测试（版本 0.01）
+# 编译并运行回归测试（版本 0.02）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

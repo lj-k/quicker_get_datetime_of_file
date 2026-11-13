@@ -1,7 +1,9 @@
 // 文件日期提取脚本（Quicker「运行C#代码」普通模式）
-// 版本：0.01
+// 版本：0.02
 
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -9,13 +11,8 @@ using System.Text.RegularExpressions;
 
 public static void Exec(Quicker.Public.IStepContext context)
 {
-    string filePath = NormalizePath(ToText(context.GetVarValue("输入文件路径")));
-
-    // 先判断是不是文件：文件夹、无效路径直接跳过
-    if (filePath.Length == 0 || !File.Exists(filePath))
-    {
-        return;
-    }
+    bool isList;
+    List<string> paths = GetInputPaths(context.GetVarValue("输入文件路径"), out isList);
 
     int minYear = ToInt(context.GetVarValue("最早起始年份"), 1900);
     bool matchFileName = ToBool(context.GetVarValue("匹配文件名日期"), true);
@@ -23,7 +20,133 @@ public static void Exec(Quicker.Public.IStepContext context)
     bool matchModified = ToBool(context.GetVarValue("匹配修改日期"), true);
     bool matchCreated = ToBool(context.GetVarValue("匹配创建日期"), true);
 
-    DateTime date = DateTime.MinValue;
+    if (!isList)
+    {
+        if (paths.Count == 0)
+        {
+            return;
+        }
+
+        string filePath = paths[0];
+        if (!File.Exists(filePath))
+        {
+            return;
+        }
+
+        DateTime singleDate;
+        if (!TryGetFileDate(filePath, minYear, matchFileName, matchExif, matchModified, matchCreated, out singleDate))
+        {
+            throw new InvalidOperationException("未能从文件获取日期：" + filePath);
+        }
+
+        context.SetVarValue("date", singleDate);
+        context.SetVarValue("yyyy", singleDate.ToString("yyyy", CultureInfo.InvariantCulture));
+        context.SetVarValue("mm", singleDate.ToString("MM", CultureInfo.InvariantCulture));
+        context.SetVarValue("dd", singleDate.ToString("dd", CultureInfo.InvariantCulture));
+        context.SetVarValue("yyyy_MM", singleDate.ToString("yyyy.MM", CultureInfo.InvariantCulture));
+        return;
+    }
+
+    List<string> dates = new List<string>();
+    List<string> years = new List<string>();
+    List<string> months = new List<string>();
+    List<string> days = new List<string>();
+    List<string> yearMonths = new List<string>();
+
+    for (int i = 0; i < paths.Count; i++)
+    {
+        string filePath = paths[i];
+        if (!File.Exists(filePath))
+        {
+            continue;
+        }
+
+        DateTime date;
+        if (!TryGetFileDate(filePath, minYear, matchFileName, matchExif, matchModified, matchCreated, out date))
+        {
+            continue;
+        }
+
+        dates.Add(date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+        years.Add(date.ToString("yyyy", CultureInfo.InvariantCulture));
+        months.Add(date.ToString("MM", CultureInfo.InvariantCulture));
+        days.Add(date.ToString("dd", CultureInfo.InvariantCulture));
+        yearMonths.Add(date.ToString("yyyy.MM", CultureInfo.InvariantCulture));
+    }
+
+    context.SetVarValue("date", dates);
+    context.SetVarValue("yyyy", years);
+    context.SetVarValue("mm", months);
+    context.SetVarValue("dd", days);
+    context.SetVarValue("yyyy_MM", yearMonths);
+}
+
+private static List<string> GetInputPaths(object value, out bool isList)
+{
+    isList = false;
+    List<string> paths = new List<string>();
+
+    if (value == null)
+    {
+        return paths;
+    }
+
+    string text = value as string;
+    if (text != null)
+    {
+        string[] lines = text.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length <= 1)
+        {
+            if (lines.Length == 1)
+            {
+                string singlePath = NormalizePath(lines[0]);
+                if (singlePath.Length > 0)
+                {
+                    paths.Add(singlePath);
+                }
+            }
+            return paths;
+        }
+
+        isList = true;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string linePath = NormalizePath(lines[i]);
+            if (linePath.Length > 0)
+            {
+                paths.Add(linePath);
+            }
+        }
+        return paths;
+    }
+
+    IEnumerable enumerable = value as IEnumerable;
+    if (enumerable != null && !(value is IDictionary))
+    {
+        isList = true;
+        foreach (object item in enumerable)
+        {
+            string itemPath = NormalizePath(ToText(item));
+            if (itemPath.Length > 0)
+            {
+                paths.Add(itemPath);
+            }
+        }
+        return paths;
+    }
+
+    string fallbackPath = NormalizePath(ToText(value));
+    if (fallbackPath.Length > 0)
+    {
+        paths.Add(fallbackPath);
+    }
+    return paths;
+}
+
+private static bool TryGetFileDate(string filePath, int minYear, bool matchFileName, bool matchExif,
+    bool matchModified, bool matchCreated, out DateTime date)
+{
+    date = DateTime.MinValue;
     bool found = false;
 
     // 1. 文件名中的日期
@@ -66,15 +189,7 @@ public static void Exec(Quicker.Public.IStepContext context)
         }
     }
 
-    if (!found)
-    {
-        throw new InvalidOperationException("未能从文件获取日期：" + filePath);
-    }
-
-    context.SetVarValue("date", date);
-    context.SetVarValue("yyyy", date.Year);
-    context.SetVarValue("mm", date.Month);
-    context.SetVarValue("dd", date.Day);
+    return found;
 }
 
 private static string NormalizePath(string path)

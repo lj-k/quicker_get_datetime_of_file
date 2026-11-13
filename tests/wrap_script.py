@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# 把 Quicker 脚本包装成可独立编译的类（版本 0.01）
+# 把 Quicker 脚本包装成可独立编译的类（版本 0.02）
 """Quicker 会把脚本成员放入宿主类；本地测试时用同样的方式包装。"""
 
 import sys

@@ -1,4 +1,4 @@
-// Quicker.Public.IStepContext 的测试替身（版本 0.01）
+// Quicker.Public.IStepContext 的测试替身（版本 0.02）
 using System;
 using System.Collections.Generic;
 

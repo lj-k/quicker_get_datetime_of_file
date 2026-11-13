@@ -12,13 +12,14 @@ CS_PATH = ROOT / "src" / "FileDateExtractor.cs"
 OUT_PATH = ROOT / "dist" / "FileDateExtractor.quicker.json"
 
 ACTION_ID = "6f1c2a7e-3b4d-4f8a-9c21-7d5e8a0b4c63"
-VERSION = "0.01"
+VERSION = "0.02"
 
 TEXT = 0
 NUMBER = 1
 BOOLEAN = 2
 DATETIME = 6
 INTEGER = 12
+OBJECT = 98
 
 
 def variable(key, var_type, desc, default_value):
@@ -75,16 +76,17 @@ def build():
     script = CS_PATH.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\n", "\r\n")
 
     variables = [
-        variable("输入文件路径", TEXT, "要处理的文件路径；文件夹会被跳过", ""),
+        variable("输入文件路径", TEXT, "单个文件路径，或多行路径列表（每行一个）；文件夹会被跳过", ""),
         variable("最早起始年份", INTEGER, "文件名日期匹配的最早年份，范围到当前年", "1900"),
         variable("匹配文件名日期", BOOLEAN, "是否从文件名中提取日期", "true"),
         variable("匹配exif拍摄日期", BOOLEAN, "是否读取 EXIF 拍摄日期", "true"),
         variable("匹配修改日期", BOOLEAN, "是否使用文件修改日期", "true"),
         variable("匹配创建日期", BOOLEAN, "是否使用文件创建日期", "true"),
-        variable("date", DATETIME, "提取到的完整日期时间", ""),
-        variable("yyyy", INTEGER, "年份", ""),
-        variable("mm", INTEGER, "月份", ""),
-        variable("dd", INTEGER, "日", ""),
+        variable("date", OBJECT, "单个输入时为日期时间；列表输入时为日期文本列表（yyyy-MM-dd HH:mm:ss）", ""),
+        variable("yyyy", OBJECT, "单个输入时为四位年份文本；列表输入时为文本列表", ""),
+        variable("mm", OBJECT, "单个输入时为两位月份文本；列表输入时为文本列表", ""),
+        variable("dd", OBJECT, "单个输入时为两位日期文本；列表输入时为文本列表", ""),
+        variable("yyyy_MM", OBJECT, "yyyy.MM 格式文本（如 2020.02）；列表输入时为文本列表", ""),
         variable("formOk", BOOLEAN, "表单是否确认", "false"),
         variable("scriptOk", BOOLEAN, "C# 脚本是否执行成功", "false"),
     ]
@@ -93,10 +95,9 @@ def build():
         form_field(
             "输入文件路径",
             "输入文件路径",
-            "要处理的文件；如果选到文件夹会自动跳过",
-            1,
-            IsRequired=True,
-            TextTools="SelectSingleFile",
+            "单个路径，或每行一个路径（列表）；文件夹会自动跳过",
+            2,
+            IsRequired=False,
         ),
         form_field(
             "最早起始年份",
@@ -177,7 +178,7 @@ def build():
         "Col": 0,
         "ActionType": 24,
         "Title": "文件日期提取",
-        "Description": "按文件名 → EXIF 拍摄日期 → 修改日期 → 创建日期 的顺序提取文件日期，输出 date、yyyy、mm、dd。版本 " + VERSION + "。",
+        "Description": "支持单个路径或路径列表，按文件名 → EXIF 拍摄日期 → 修改日期 → 创建日期的顺序提取文件日期，自适应输出单个值或列表。版本 " + VERSION + "。",
         "Icon": "fa:Solid_CalendarDay",
         "Path": None,
         "DelayMs": 0,
@@ -241,9 +242,10 @@ def verify(script):
     assert VERSION in action["Description"]
 
     data = json.loads(action["Data"])
-    assert len(data["Variables"]) == 12
+    assert len(data["Variables"]) == 13
     keys = [v["Key"] for v in data["Variables"]]
     assert len(keys) == len(set(keys)), "变量名重复"
+    assert "yyyy_MM" in keys, "缺少 yyyy_MM 变量"
 
     assert len(data["Steps"]) == 2
     form_step, script_step = data["Steps"]
@@ -257,10 +259,9 @@ def verify(script):
     assert set(form_keys).issubset(set(keys)), "表单字段缺少对应变量"
 
     assert "public static void Exec(Quicker.Public.IStepContext context)" in script
-    assert "context.SetVarValue(\"date\", date);" in script
-    assert "context.SetVarValue(\"yyyy\", date.Year);" in script
-    assert "context.SetVarValue(\"mm\", date.Month);" in script
-    assert "context.SetVarValue(\"dd\", date.Day);" in script
+    assert "context.SetVarValue(\"date\", singleDate);" in script
+    assert "context.SetVarValue(\"yyyy_MM\"" in script
+    assert "context.SetVarValue(\"date\", dates);" in script
 
     print("OK:", OUT_PATH.relative_to(ROOT))
     print("变量:", len(keys), "步骤:", len(data["Steps"]), "表单字段:", len(form_keys))

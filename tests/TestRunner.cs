@@ -1,5 +1,6 @@
-// 文件日期提取脚本的回归测试（版本 0.01）
+// 文件日期提取脚本的回归测试（版本 0.02）
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Quicker.Public;
 
@@ -35,20 +36,78 @@ public static class TestRunner
 
         ExpectExact("EXIF 保留时分秒", "photo_exif_le.jpg", new DateTime(2022, 6, 7, 8, 9, 10));
         ExpectQuotedPath();
+        ExpectSingleTextWithNewline();
         ExpectCreationFallback();
         ExpectSkip("文件夹跳过", root);
         ExpectSkip("不存在文件跳过", Path.Combine(root, "not-exists.jpg"));
-        ExpectThrow("全部关闭且无文件日期", Path.Combine(root, "plain.txt"));
+        ExpectThrow("单个文件全部关闭且无文件日期", Path.Combine(root, "plain.txt"));
+
+        ExpectList("列表三个文件",
+            new List<string>
+            {
+                Path.Combine(root, "2020-02-02_photo.jpg"),
+                Path.Combine(root, "IMG20200202.jpg"),
+                Path.Combine(root, "plain.txt")
+            },
+            new string[] { "2020", "2020", "2021" },
+            new string[] { "02", "02", "03" },
+            new string[] { "02", "02", "03" },
+            new string[] { "2020.02", "2020.02", "2021.03" });
+
+        ExpectList("列表跳过文件夹和缺失项",
+            new List<string>
+            {
+                root,
+                Path.Combine(root, "not-exists.jpg"),
+                Path.Combine(root, "2020-02-02_photo.jpg")
+            },
+            new string[] { "2020" },
+            new string[] { "02" },
+            new string[] { "02" },
+            new string[] { "2020.02" });
+
+        ExpectList("多行文本按列表输出",
+            Path.Combine(root, "2020-02-02_photo.jpg") + "\r\n" + Path.Combine(root, "IMG20200202.jpg"),
+            new string[] { "2020", "2020" },
+            new string[] { "02", "02" },
+            new string[] { "02", "02" },
+            new string[] { "2020.02", "2020.02" });
+
+        ExpectList("单元素列表仍输出列表",
+            new List<string> { Path.Combine(root, "photo_exif_le.jpg") },
+            new string[] { "2022" },
+            new string[] { "06" },
+            new string[] { "07" },
+            new string[] { "2022.06" });
+
+        ExpectList("列表非法日期回退",
+            new List<string>
+            {
+                Path.Combine(root, "bad_month_2020-13-01.jpg"),
+                Path.Combine(root, "plain.txt")
+            },
+            new string[] { "2021", "2021" },
+            new string[] { "03", "03" },
+            new string[] { "03", "03" },
+            new string[] { "2021.03", "2021.03" });
+
+        ExpectList("列表全部无效输出空列表",
+            new List<string> { root, Path.Combine(root, "not-exists.jpg") },
+            new string[0], new string[0], new string[0], new string[0]);
+
+        ExpectList("空列表输出空列表",
+            new List<string>(),
+            new string[0], new string[0], new string[0], new string[0]);
 
         Console.WriteLine();
         Console.WriteLine("通过：" + passed + "，失败：" + failed);
         return failed == 0 ? 0 : 1;
     }
 
-    private static TestContext Run(string path, int minYear, bool matchFile, bool matchExif, bool matchModified, bool matchCreated)
+    private static TestContext Run(object pathValue, int minYear, bool matchFile, bool matchExif, bool matchModified, bool matchCreated)
     {
         TestContext context = new TestContext();
-        context.Set("输入文件路径", path);
+        context.Set("输入文件路径", pathValue);
         context.Set("最早起始年份", minYear);
         context.Set("匹配文件名日期", matchFile);
         context.Set("匹配exif拍摄日期", matchExif);
@@ -78,15 +137,71 @@ public static class TestRunner
                 return;
             }
 
-            if (!(context.Get("yyyy") is int) || !(context.Get("mm") is int) || !(context.Get("dd") is int))
+            if (!(context.Get("yyyy") is string) || !(context.Get("mm") is string) ||
+                !(context.Get("dd") is string) || !(context.Get("yyyy_MM") is string))
             {
-                Fail(name, "yyyy/mm/dd 不是 int");
+                Fail(name, "yyyy/mm/dd/yyyy_MM 不是文本");
                 return;
             }
-            if ((int)context.Get("yyyy") != actual.Year || (int)context.Get("mm") != actual.Month || (int)context.Get("dd") != actual.Day)
+
+            if ((string)context.Get("yyyy") != actual.ToString("yyyy") ||
+                (string)context.Get("mm") != actual.ToString("MM") ||
+                (string)context.Get("dd") != actual.ToString("dd") ||
+                (string)context.Get("yyyy_MM") != actual.ToString("yyyy.MM"))
             {
-                Fail(name, "yyyy/mm/dd 与 date 不一致");
+                Fail(name, "文本输出与 date 不一致");
                 return;
+            }
+
+            Pass(name);
+        }
+        catch (Exception ex)
+        {
+            Fail(name, "异常 " + ex.GetType().Name + "：" + ex.Message);
+        }
+    }
+
+    private static void ExpectList(string name, object inputValue, string[] expectedYears, string[] expectedMonths,
+        string[] expectedDays, string[] expectedYearMonths)
+    {
+        try
+        {
+            TestContext context = Run(inputValue, 1900, true, true, true, true);
+            List<string> dates = context.Get("date") as List<string>;
+            List<string> years = context.Get("yyyy") as List<string>;
+            List<string> months = context.Get("mm") as List<string>;
+            List<string> days = context.Get("dd") as List<string>;
+            List<string> yearMonths = context.Get("yyyy_MM") as List<string>;
+
+            if (dates == null || years == null || months == null || days == null || yearMonths == null)
+            {
+                Fail(name, "输出不是 List<string>");
+                return;
+            }
+
+            if (dates.Count != expectedYears.Length || years.Count != expectedYears.Length ||
+                months.Count != expectedYears.Length || days.Count != expectedYears.Length ||
+                yearMonths.Count != expectedYears.Length)
+            {
+                Fail(name, "输出数量不一致");
+                return;
+            }
+
+            for (int i = 0; i < expectedYears.Length; i++)
+            {
+                if (years[i] != expectedYears[i] || months[i] != expectedMonths[i] ||
+                    days[i] != expectedDays[i] || yearMonths[i] != expectedYearMonths[i])
+                {
+                    Fail(name, "第 " + (i + 1) + " 项文本不一致");
+                    return;
+                }
+
+                string prefix = expectedYears[i] + "-" + expectedMonths[i] + "-" + expectedDays[i];
+                if (!dates[i].StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    Fail(name, "date 列表元素格式不正确：" + dates[i]);
+                    return;
+                }
             }
 
             Pass(name);
@@ -133,6 +248,26 @@ public static class TestRunner
         catch (Exception ex)
         {
             Fail("带引号的路径", "异常 " + ex.GetType().Name + "：" + ex.Message);
+        }
+    }
+
+    private static void ExpectSingleTextWithNewline()
+    {
+        try
+        {
+            string input = Path.Combine(root, "2020-02-02_photo.jpg") + "\r\n";
+            TestContext context = Run(input, 1900, true, true, true, true);
+            object value = context.Get("date");
+            if (!(value is DateTime) || ((DateTime)value).Date != new DateTime(2020, 2, 2))
+            {
+                Fail("单路径尾随换行按单值输出", "实际 " + Describe(value));
+                return;
+            }
+            Pass("单路径尾随换行按单值输出");
+        }
+        catch (Exception ex)
+        {
+            Fail("单路径尾随换行按单值输出", "异常 " + ex.GetType().Name + "：" + ex.Message);
         }
     }
 
