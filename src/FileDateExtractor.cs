@@ -21,7 +21,7 @@ public static void Exec(Quicker.Public.IStepContext context)
     bool matchCreated = ToBool(context.GetVarValue("匹配创建日期"), true);
 
     if (!isList)
-    {
+    {                                        
         if (paths.Count == 0)
         {
             return;
