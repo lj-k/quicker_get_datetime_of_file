@@ -1,2 +1,137 @@
-# quicker_get_datetime_of_file
-给定文件路径，获得文件日期信息：文件名、拍摄日期
+# 文件日期提取（Quicker 动作）
+
+版本：0.01
+
+一个基于 Quicker「运行C#代码」模块的组合动作。传入一个文件路径，按固定顺序尝试获取日期，并输出完整日期与年、月、日。
+
+## 功能
+
+- 先判断路径是否为文件。文件夹、无效路径、不存在的路径直接跳过，不产生输出。
+- 按以下顺序匹配，任意一项成功即停止：
+  1. 文件名中的日期（可开关）
+  2. EXIF 拍摄日期（可开关）
+  3. 文件修改日期（可开关）
+  4. 文件创建日期（可开关）
+- 输出 `date`（日期时间）、`yyyy`（整数）、`mm`（整数）、`dd`（整数）。
+
+## 文件结构
+
+| 路径 | 说明 |
+|------|------|
+| `src/FileDateExtractor.cs` | Quicker「运行C#代码」模块使用的脚本源码 |
+| `dist/FileDateExtractor.quicker.json` | 可直接导入 Quicker 的动作 JSON |
+| `tools/build_action.py` | 从脚本源码生成动作 JSON |
+| `tests/run_tests.sh` | 编译并运行回归测试 |
+| `tests/make_fixtures.py` | 生成测试文件与 EXIF 样本 |
+| `tests/TestRunner.cs` | 回归测试用例 |
+| `tests/QuickerStub.cs` | `IStepContext` 的测试替身 |
+
+## 输入参数
+
+| 变量名 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| 输入文件路径 | 文本 | 空 | 要处理的文件路径。支持带引号的路径和环境变量；文件夹会被跳过 |
+| 最早起始年份 | 整数 | 1900 | 仅用于文件名日期。有效年份范围为该值到当前年 |
+| 匹配文件名日期 | 布尔 | true | 是否尝试从文件名提取日期 |
+| 匹配exif拍摄日期 | 布尔 | true | 是否尝试读取 EXIF 拍摄日期 |
+| 匹配修改日期 | 布尔 | true | 是否使用文件修改日期 |
+| 匹配创建日期 | 布尔 | true | 是否使用文件创建日期 |
+
+## 输出参数
+
+| 变量名 | 类型 | 说明 |
+|--------|------|------|
+| date | 日期时间 | 匹配到的完整日期时间 |
+| yyyy | 整数 | 年 |
+| mm | 整数 | 月 |
+| dd | 整数 | 日 |
+
+匹配成功时四个变量同时写入。跳过文件夹时四个变量都不写入。
+
+## 日期匹配规则
+
+### 1. 文件名日期
+
+只检查主文件名，不检查目录名，也不检查扩展名。按以下格式依次尝试：
+
+- 格式1：`yyyy-mm-dd`，例如 `2020-02-02`
+- 格式2：`yyyymmdd`，例如 `20200202`
+
+约束：
+
+- 年份必须在「最早起始年份」到当前年之间。
+- 日期必须是真实存在的日期，`2020-13-01`、`2020-02-30` 会被忽略。
+- 日期前必须是字符串起始或非数字字符。`x2020-02-02y` 可以匹配，`120200202` 不会从中间截取。
+- 格式1优先于格式2。同一格式有多个候选时，取第一个合法候选。
+- 月份和日期必须为两位，`2020-2-2` 不匹配。
+
+### 2. EXIF 拍摄日期
+
+- 支持 JPEG（APP1/Exif 段）与 TIFF 结构文件，大小端均支持。
+- 优先读取 `DateTimeOriginal`（0x9003）；不存在时读取 `DateTimeDigitized`（0x9004）。
+- EXIF 日期格式按 `yyyy:MM:dd HH:mm:ss` 等标准形式解析。
+- 文件大于 256MB 时跳过 EXIF 读取，避免一次读入过多数据。
+- 读取失败、格式损坏或没有拍摄日期时，视为不匹配并继续下一来源。
+
+### 3. 修改日期
+
+使用 `File.GetLastWriteTime`，即 Windows 资源管理器中看到的“修改日期”。
+
+### 4. 创建日期
+
+使用 `File.GetCreationTime`，即 Windows 资源管理器中看到的“创建日期”。
+
+修改日期和创建日期不受「最早起始年份」限制。
+
+## 安装与使用
+
+### 方式一：导入动作 JSON
+
+1. 打开 Quicker 面板。
+2. 在空白处右键，选择导入动作，选择 `dist/FileDateExtractor.quicker.json`。
+3. 运行动作，在表单中填写文件路径和开关，点击确定。
+4. 结果写入动作变量 `date`、`yyyy`、`mm`、`dd`，供后续步骤使用。
+
+### 方式二：手动创建
+
+1. 新建组合动作，按上表创建 6 个输入变量和 4 个输出变量（变量名必须一致），再创建 `formOk`、`scriptOk` 两个布尔变量用于步骤状态。
+2. 添加「多字段表单」步骤，将 6 个输入变量加入表单。
+3. 添加「运行C#代码」步骤：
+   - 运行模式：普通模式（Roslyn）
+   - 脚本内容：粘贴 `src/FileDateExtractor.cs`
+   - 执行线程：后台线程（MTA）
+   - 开启磁盘缓存：是
+4. 如需在批量循环中使用，可关闭 C# 步骤的「失败后停止」，由后续步骤判断 `isSuccess`。
+
+## 构建与测试
+
+生成动作 JSON：
+
+```bash
+python3 tools/build_action.py
+```
+
+运行回归测试（需要 `mono-mcs` 与 `mono`）：
+
+```bash
+./tests/run_tests.sh
+```
+
+测试覆盖 24 个用例，包括两种文件名格式、前置数字边界、年份范围、非法日期、大小端 EXIF、EXIF 缺失时的回退、修改/创建日期、文件夹跳过、缺失文件跳过、全开关关闭等。
+
+## 已知限制
+
+- 文件名日期只识别两位月份和日期，不识别 `2020-2-2`。
+- 文件名日期只检查日期前边界，不检查后边界。
+- 不解析 HEIC 等非 JPEG/TIFF 容器的 EXIF。
+- EXIF 只读取拍摄日期与数字化日期，不把 EXIF 的 `DateTime`（0x0132）当作拍摄日期。
+- 文件修改日期和创建日期使用系统本地时间。
+
+## 参考
+
+- [Quicker 运行C#代码](https://getquicker.net/KC/Help/Doc/csscript)
+- [Quicker V2 运行C#代码](https://docs.getquicker.net/v2/xaction/modules/csscript/)
+- [Quicker 变量](https://docs.getquicker.net/v2/xaction/concepts/variables/)
+- [Quicker 多字段表单](https://getquicker.net/KC/Help/Doc/form)
+- [动作 JSON 生成方法](https://getquicker.net/KC/Kb/Article/1168)
+- [表单 formDef 实例](https://github.com/QuickerOrg/docs.getquicker.net/blob/main/data/step-render/examples/d08bf039-e016-4482-7fe6-08dbdfe824d8.json)
